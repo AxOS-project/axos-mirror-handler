@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-
 import sys
 import os
 import base64
@@ -9,17 +8,21 @@ import urllib.parse
 import urllib.error
 
 # Config
-PROJECT_ID = "AxOS-Project/AxMirrors"
-BRANCH     = "main"
-PKG_PATH   = "x86_64"
+REPO   = "AxOS-Project/AxMirrors"
+BRANCH = "main"
+PKG_PATH = "x86_64"
 
 with open("TOKEN.txt") as f:
     TOKEN = f.read().strip()
 
 # Code
-API = f"https://gitlab.com/api/v4/projects/{urllib.parse.quote(PROJECT_ID, safe='')}"
-HEADERS = {"PRIVATE-TOKEN": TOKEN, "Content-Type": "application/json"}
-
+API = f"https://api.github.com/repos/{REPO}"
+HEADERS = {
+    "Authorization": f"Bearer {TOKEN}",
+    "Accept": "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+    "Content-Type": "application/json",
+}
 
 def request(method, endpoint, data=None):
     url = f"{API}{endpoint}"
@@ -33,48 +36,65 @@ def request(method, endpoint, data=None):
         print(f"HTTP {e.code}: {e.read().decode()}")
         sys.exit(1)
 
+def get_file_sha(name):
+    """Fetch the blob SHA of an existing file, or None if it doesn't exist."""
+    encoded = urllib.parse.quote(f"{PKG_PATH}/{name}", safe="")
+    params = urllib.parse.urlencode({"ref": BRANCH})
+    url = f"{API}/contents/{encoded}?{params}"
+    req = urllib.request.Request(url, method="GET", headers=HEADERS)
+    try:
+        with urllib.request.urlopen(req) as r:
+            return json.loads(r.read())["sha"]
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return None
+        print(f"HTTP {e.code}: {e.read().decode()}")
+        sys.exit(1)
 
 def cmd_list():
-    params = urllib.parse.urlencode({"path": PKG_PATH, "ref": BRANCH, "per_page": 100})
-    items = request("GET", f"/repository/tree?{params}")
-    blobs = [i for i in items if i["type"] == "blob"]
-    if not blobs:
+    encoded_path = urllib.parse.quote(PKG_PATH, safe="")
+    params = urllib.parse.urlencode({"ref": BRANCH})
+    items = request("GET", f"/contents/{encoded_path}?{params}")
+    files = [i for i in items if i["type"] == "file"]
+    if not files:
         print("No packages found.")
     else:
-        for f in blobs:
+        for f in files:
             print(f["name"])
-
 
 def cmd_add(filepath):
     if not os.path.isfile(filepath):
         print(f"File not found: {filepath}")
         sys.exit(1)
-
     name = os.path.basename(filepath)
-    encoded_name = urllib.parse.quote(f"{PKG_PATH}/{name}", safe="")
-
+    encoded = urllib.parse.quote(f"{PKG_PATH}/{name}", safe="")
     print(f"Uploading {name} ...")
     with open(filepath, "rb") as f:
         content = base64.b64encode(f.read()).decode()
-
-    request("POST", f"/repository/files/{encoded_name}", {
-        "branch": BRANCH,
-        "commit_message": f"mirror: add {name}",
-        "encoding": "base64",
+    body = {
+        "message": f"mirror: add {name}",
         "content": content,
-    })
-    print(f"Done: {name} added.")
-
+        "branch": BRANCH,
+    }
+    sha = get_file_sha(name)
+    if sha:
+        body["sha"] = sha  # required for updates
+    request("PUT", f"/contents/{encoded}", body)
+    print(f"Done: {name} {'updated' if sha else 'added'}.")
 
 def cmd_remove(name):
-    encoded_name = urllib.parse.quote(f"{PKG_PATH}/{name}", safe="")
+    encoded = urllib.parse.quote(f"{PKG_PATH}/{name}", safe="")
+    sha = get_file_sha(name)
+    if not sha:
+        print(f"File not found in repo: {name}")
+        sys.exit(1)
     print(f"Removing {name} ...")
-    request("DELETE", f"/repository/files/{encoded_name}", {
+    request("DELETE", f"/contents/{encoded}", {
+        "message": f"mirror: remove {name}",
+        "sha": sha,
         "branch": BRANCH,
-        "commit_message": f"mirror: remove {name}",
     })
     print(f"Done: {name} removed.")
-
 
 def usage():
     print("Usage:")
@@ -82,7 +102,6 @@ def usage():
     print(f"  {sys.argv[0]} add <path/to/file>")
     print(f"  {sys.argv[0]} remove <filename>")
     sys.exit(1)
-
 
 match sys.argv[1:]:
     case ["list"]:          cmd_list()

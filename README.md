@@ -1,13 +1,11 @@
 # AxOS Mirror Handler
 
-A simple script that allows you to list, add, and remove packages from the [AxOS-Project/AxMirrors](https://gitlab.com/AxOS-Project/AxMirrors) GitLab repository.
+A simple script that allows you to list, add, and remove packages from the [AxOS-Project/AxMirrors](https://github.com/AxOS-Project/AxMirrors) GitHub repository.
 
 ## Requirements
 
 - Create a `TOKEN.txt` file.
-- Put your GitLab token that has `api` scope enabled in the `TOKEN.txt` file.
-
-![alt text](.github/image.png)
+- Put your GitHub token that has Read, Write permissions enabled in the `TOKEN.txt` file.
 
 ## Usage
 
