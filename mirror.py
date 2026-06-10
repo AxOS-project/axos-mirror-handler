@@ -10,12 +10,18 @@ import urllib.parse
 import urllib.error
 from pathlib import Path
 
+# Config
+REPO     = "AxOS-Project/AxMirrors"
+BRANCH   = "main"
+PKG_PATH = "x86_64"
+
 # Argument definition
 parser = argparse.ArgumentParser(
     prog="axmirrors",
     description="Push files to AxMirrors"
 )
 parser.add_argument("--token-file", default="~/.config/axmirror/TOKEN.txt", metavar="PATH", help="Path to token file")
+parser.add_argument("--branch", help="Push a separate branch")
 
 subparsers = parser.add_subparsers(dest="command")
 subparsers.add_parser("list", help="List files in AxMirrors")
@@ -28,6 +34,10 @@ shadow_parser.add_argument("path", help="Path to file")
 subparsers.add_parser("config", help="Show current configuration")
 
 args = parser.parse_args()
+
+if args.branch:
+    print(f"Using branch: '{args.branch}'")
+    BRANCH = args.branch
 
 if args.token_file:
     token_path = Path(args.token_file)
@@ -57,11 +67,6 @@ if args.token_file:
 
     with open(expanded_path) as f:
         TOKEN = f.read().strip()
-
-# Config
-REPO     = "AxOS-Project/AxMirrors"
-BRANCH   = "main"
-PKG_PATH = "x86_64"
 
 # Code
 API = f"https://api.github.com/repos/{REPO}"
