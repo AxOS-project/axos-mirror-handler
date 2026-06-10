@@ -32,6 +32,12 @@ $ axmirrors add <path/to/file>
 $ axmirrors remove <filename>
 ```
 
+**Shadow a package:**
+
+```sh
+$ axmirrors shadow <path/to/file>
+```
+
 **View Config:**
 
 ```sh
