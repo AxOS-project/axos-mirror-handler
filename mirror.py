@@ -81,6 +81,7 @@ def request(method, endpoint, data=None):
     url = f"{API}{endpoint}"
     body = json.dumps(data).encode() if data else None
     req = urllib.request.Request(url, method=method, headers=HEADERS, data=body)
+    req.get_method = lambda: method
     try:
         with urllib.request.urlopen(req) as r:
             raw = r.read()
@@ -222,11 +223,11 @@ def cmd_shadow(filepath):
                 "tree": new_tree_sha,
                 "parents": [base_sha]
             })
-            request("PATCH", f"/git/ref/heads/{BRANCH}", {
+            request("PATCH", f"/git/refs/heads/{BRANCH}", {
                 "sha": new_commit["sha"]
             })
 
-            print(f"Done: Cleanly updated {name} in a single commit.")
+            print(f"Done: {name} is shadowed.")
 
     else:
         print("File does not seem to be a package.")
