@@ -3,17 +3,62 @@ import sys
 import os
 import base64
 import json
+import argparse
 import urllib.request
 import urllib.parse
 import urllib.error
+from pathlib import Path
+
+# Argument definition
+parser = argparse.ArgumentParser(
+    prog="axmirrors",
+    description="Push files to AxMirrors"
+)
+parser.add_argument("--token-file", default="~/.config/axmirror/TOKEN.txt", metavar="PATH", help="Path to token file")
+
+subparsers = parser.add_subparsers(dest="command")
+subparsers.add_parser("list", help="List files in AxMirrors")
+add_parser = subparsers.add_parser("add", help="Add a file to AxMirrors")
+add_parser.add_argument("path", help="Path to file")
+remove_parser = subparsers.add_parser("remove", help="Remove a file from AxMirrors")
+remove_parser.add_argument("name", help="Filename to remove")
+subparsers.add_parser("config", help="Show current configuration")
+
+args = parser.parse_args()
+
+if args.token_file:
+    token_path = Path(args.token_file)
+    expanded_path = token_path.expanduser()
+
+    if not os.path.isfile(expanded_path):
+        print(f"Token file not found: {args.token_file}")
+        res = ""
+
+        while res.lower() not in ("y", "n"):
+            res = input("Would you like to initialize it? [y/N] ").strip()
+
+        match (res.lower()):
+            case "y":
+                print("Please enter your TOKEN:")
+                token = input("").strip()
+                expanded_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(expanded_path, "w") as file:
+                    file.write(token)
+                    print("Successfully saved your TOKEN!")
+                    print("NOTE: Your TOKEN is stored in plain text.")
+
+            case "n":
+                sys.exit(0);
+            case _:
+                sys.exit(1);
+
+    with open(expanded_path) as f:
+        TOKEN = f.read().strip()
 
 # Config
-REPO   = "AxOS-Project/AxMirrors"
-BRANCH = "main"
+REPO     = "AxOS-Project/AxMirrors"
+BRANCH   = "main"
 PKG_PATH = "x86_64"
-
-with open("TOKEN.txt") as f:
-    TOKEN = f.read().strip()
 
 # Code
 API = f"https://api.github.com/repos/{REPO}"
@@ -96,15 +141,16 @@ def cmd_remove(name):
     })
     print(f"Done: {name} removed.")
 
-def usage():
-    print("Usage:")
-    print(f"  {sys.argv[0]} list")
-    print(f"  {sys.argv[0]} add <path/to/file>")
-    print(f"  {sys.argv[0]} remove <filename>")
-    sys.exit(1)
+def cmd_config():
+    print("Mirror Config:")
+    print(f"- repo: {REPO}")
+    print(f"- branch: {BRANCH}")
+    print(f"- pkg_path: {PKG_PATH}")
 
-match sys.argv[1:]:
-    case ["list"]:          cmd_list()
-    case ["add", path]:     cmd_add(path)
-    case ["remove", name]:  cmd_remove(name)
-    case _:                 usage()
+# Argument handling
+match args.command:
+    case "list":    cmd_list()
+    case "add":     cmd_add(args.path)
+    case "remove":  cmd_remove(args.name)
+    case "config":  cmd_config()
+    case _:         parser.print_help(); sys.exit(1)
