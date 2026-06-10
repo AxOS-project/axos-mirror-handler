@@ -31,3 +31,9 @@ $ axmirrors add <path/to/file>
 ```sh
 $ axmirrors remove <filename>
 ```
+
+**View Config:**
+
+```sh
+$ axmirrors config
+```
