@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import sys
 import os
+import re
 import base64
 import json
 import argparse
@@ -22,6 +23,8 @@ add_parser = subparsers.add_parser("add", help="Add a file to AxMirrors")
 add_parser.add_argument("path", help="Path to file")
 remove_parser = subparsers.add_parser("remove", help="Remove a file from AxMirrors")
 remove_parser.add_argument("name", help="Filename to remove")
+shadow_parser = subparsers.add_parser("shadow", help="Add or Shadow a package in AxMirrors")
+shadow_parser.add_argument("path", help="Path to file")
 subparsers.add_parser("config", help="Show current configuration")
 
 args = parser.parse_args()
@@ -141,6 +144,90 @@ def cmd_remove(name):
     })
     print(f"Done: {name} removed.")
 
+def cmd_shadow(filepath):
+    if not os.path.isfile(filepath):
+        print(f"File not found: {filepath}")
+        sys.exit(1)
+    name = os.path.basename(filepath)
+
+    if name.endswith(".pkg.tar.zst"):
+        pkg = re.split(r'-[0-9]', name)[0]
+        encoded_path = urllib.parse.quote(PKG_PATH, safe="")
+        params = urllib.parse.urlencode({"ref": BRANCH})
+        items = request("GET", f"/contents/{encoded_path}?{params}")
+        files = [i for i in items if i["type"] == "file"]
+
+        if not files:
+            print("No packages found.")
+            cmd_add(filepath)
+        else:
+            tree_changes = []
+            to_delete    = []
+            for f in files:
+                if not (f["name"].endswith(".pkg.tar.zst")):
+                    continue;
+
+                remote_pkg_base = re.split(r'-[0-9]', f["name"])[0]
+                if remote_pkg_base == pkg:
+                    to_delete.append(f)
+
+            if to_delete:
+                print("\nThe following old versions will be REMOVED from GitHub:")
+                for old_f in to_delete:
+                    print(f"  - {old_f['name']}")
+                
+                confirm = input("\nDo you want to proceed with swapping these versions? [y/N]: ").strip().lower()
+                if confirm != "y":
+                    sys.exit(0)
+
+                for old_f in to_delete:
+                    tree_changes.append({
+                        "path": f"{PKG_PATH}/{old_f['name']}",
+                        "mode": "100644",
+                        "type": "blob",
+                        "sha": None
+                    })
+            else:
+                print("\nNo previous versions found to remove.")
+
+            with open(filepath, "rb") as f:
+                content = base64.b64encode(f.read()).decode()
+
+            tree_changes.append({
+                "path": f"{PKG_PATH}/{name}",
+                "mode": "100644",
+                "type": "blob",
+                "content": content
+            })
+
+            ref_data = request("GET", f"/git/ref/heads/{BRANCH}")
+            base_sha = ref_data["object"]["sha"]
+
+            commit_data = request("GET", f"/git/commits/{base_sha}")
+            base_tree_sha = commit_data["tree"]["sha"]
+
+            new_tree_data = request("POST", "/git/trees", {
+                "base_tree": base_tree_sha,
+                "tree": tree_changes
+            })
+            new_tree_sha = new_tree_data["sha"]
+
+            new_commit = request("POST", "/git/commits", {
+                "message": f"mirror: shadow update for {pkg}",
+                "tree": new_tree_sha,
+                "parents": [base_sha]
+            })
+            request("PATCH", f"/git/ref/heads/{BRANCH}", {
+                "sha": new_commit["sha"]
+            })
+
+            print(f"Done: Cleanly updated {name} in a single commit.")
+
+    else:
+        print("File does not seem to be a package.")
+        print("Skipping to add.")
+        cmd_add(filepath)
+
 def cmd_config():
     print("Mirror Config:")
     print(f"- repo: {REPO}")
@@ -152,5 +239,6 @@ match args.command:
     case "list":    cmd_list()
     case "add":     cmd_add(args.path)
     case "remove":  cmd_remove(args.name)
+    case "shadow":  cmd_shadow(args.path)
     case "config":  cmd_config()
     case _:         parser.print_help(); sys.exit(1)
