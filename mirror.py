@@ -1,14 +1,39 @@
 #!/usr/bin/env python3
 import sys
 import os
+import io
 import re
 import base64
-import json
+import orjson
 import argparse
 import urllib.request
 import urllib.parse
 import urllib.error
 from pathlib import Path
+from tqdm import tqdm
+
+# Progress bar wrapper for byte buffers
+class ProgressBuffer(io.BytesIO):
+    def __init__(self, data, desc="Uploading"):
+        super().__init__(data)
+        self.total = len(data)
+        self.pbar = tqdm(
+            total=self.total, 
+            unit="B", 
+            unit_scale=True, 
+            unit_divisor=1024, 
+            desc=desc,
+            leave=False
+        )
+
+    def read(self, size=-1):
+        chunk = super().read(size)
+        self.pbar.update(len(chunk))
+        return chunk
+
+    def close(self):
+        self.pbar.close()
+        super().close()
 
 # Config
 REPO     = "AxOS-Project/AxMirrors"
@@ -79,15 +104,29 @@ HEADERS = {
 
 def request(method, endpoint, data=None):
     url = f"{API}{endpoint}"
-    body = json.dumps(data).encode() if data else None
+    
+    body = None
+    if data is not None:
+        raw_bytes = orjson.dumps(data)
+        # if larger than 10Mb, show bar
+        if len(raw_bytes) > 1024 * 1024:
+            action_desc = endpoint.split("/")[-1]
+            body = ProgressBuffer(raw_bytes, desc=f"{method} {action_desc}")
+        else:
+            body = raw_bytes
+
     req = urllib.request.Request(url, method=method, headers=HEADERS, data=body)
-    req.get_method = lambda: method
+    
     try:
         with urllib.request.urlopen(req) as r:
             raw = r.read()
-            return json.loads(raw) if raw else {}
+            if isinstance(body, ProgressBuffer):
+                body.close()
+            return orjson.loads(raw) if raw else {}
     except urllib.error.HTTPError as e:
-        print(f"HTTP {e.code}: {e.read().decode()}")
+        if isinstance(body, ProgressBuffer):
+            body.close()
+        print(f"\nHTTP {e.code}: {e.read().decode()}")
         sys.exit(1)
 
 def get_file_sha(name):
@@ -98,7 +137,7 @@ def get_file_sha(name):
     req = urllib.request.Request(url, method="GET", headers=HEADERS)
     try:
         with urllib.request.urlopen(req) as r:
-            return json.loads(r.read())["sha"]
+            return orjson.loads(r.read())["sha"]
     except urllib.error.HTTPError as e:
         if e.code == 404:
             return None
@@ -123,8 +162,10 @@ def cmd_add(filepath):
     name = os.path.basename(filepath)
     encoded = urllib.parse.quote(f"{PKG_PATH}/{name}", safe="")
     print(f"Uploading {name} ...")
+    file_size = os.path.getsize(filepath)
     with open(filepath, "rb") as f:
-        content = base64.b64encode(f.read()).decode()
+        with tqdm.wrapattr(f, "read", total=file_size, unit="B", unit_scale=True, desc="Encoding file") as wrapped_file:
+            content = base64.b64encode(wrapped_file.read()).decode()
     body = {
         "message": f"mirror: add {name}",
         "content": content,
@@ -196,8 +237,10 @@ def cmd_shadow(filepath):
             else:
                 print("\nNo previous versions found to remove.")
 
+            file_size = os.path.getsize(filepath)
             with open(filepath, "rb") as f:
-                content = base64.b64encode(f.read()).decode()
+                with tqdm.wrapattr(f, "read", total=file_size, unit="B", unit_scale=True, desc="Encoding file") as wrapped_file:
+                    content = base64.b64encode(wrapped_file.read()).decode()
 
             tree_changes.append({
                 "path": f"{PKG_PATH}/{name}",
